@@ -1,0 +1,81 @@
+---
+title: "Wildfire Data"
+author: "Laina Cleaton"
+date: "2025-10-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r setup_tidyverse, eval=FALSE}
+library(tidyverse)
+```
+
+```{r read_files, eval = FALSE}
+evac_zone_status <- read_csv("evac_zone_status_geo_event_map.csv")
+evac_zones <- read_csv("evac_zones_gis_evaczone.csv")
+geo_events <- read_csv("geo_events_geoevent.csv")
+```
+
+```{r evac_zone_status, eval = FALSE}
+view(evac_zone_status)
+```
+
+```{r evac_zones, eval = FALSE}
+view(evac_zones)
+```
+ 
+```{r geo_events, eval = FALSE}
+view(geo_events)
+```
+
+
+In order to conduct a temporal and spatial analysis, we will join the **evac_zone_status**, **geo_events**, and **evac_zones** datasets. The 'changelog' datasets are unnecessary for the analysis. 
+
+The first join, **evac_zone_status** and **geo_events** (by geo_event_id), is important because **evac_zone_status** does not include information on the wildfire (name, geographical location, etc.). **evac_zone_status** only tracks the evacuation zone's activity over time, so by joining these two tables, we will be able to see the evacuation status changes associated with a specific wildfire.  
+
+The second join, **evac_zone_status** and **evac_zones** (by uid_v2), brings in the spatial component. Each evacuation zone's geometry and display name will be attached to its status updates, which means we'll be able to pinpoint the when and where each evacuation occurred. Evacuation boundaries can be visualized, their areas calculated, and they can be overlayed with demographic data. 
+
+Altogether, the "core spatial dataset" brings together the components of the who, when, and where of wildfire evacuations; which fire the evacuations were associated with, when they were created, and where they occurred.
+
+```{r install_sf, eval = FALSE}
+install.packages("sf")
+```
+
+
+```{r wildfire_joins, eval = FALSE}
+
+library(sf)
+
+# --- Convert CSVs to sf objects using WKT column ---
+# evac_zones
+evac_zones <- st_as_sf(evac_zones, wkt = "geom", crs = 4326)
+
+# select evac_zone_status columns
+evac_zone_status_sel <- evac_zone_status %>%
+  rename(status_date = date_created) %>%
+  select(uid_v2, geo_event_id, status_date)
+
+# select geo_events columns
+geo_events_sel <- geo_events %>%
+  rename(geo_event_id = id) %>%
+  select(geo_event_id, name, lat, lng)
+
+# select evac_zones columns
+evac_zones_sel <- evac_zones %>%
+  rename(geom_evac_zone = geom) %>%
+  select(uid_v2, display_name, geom_evac_zone)
+
+#join columns
+core_wildfire_dataset <- evac_zone_status_sel %>%
+  left_join(geo_events_sel, by = "geo_event_id") %>%
+  left_join(evac_zones_sel, by = "uid_v2") %>%
+  st_as_sf()
+
+View(core_wildfire_dataset)
+```
+
+Now that we have our **core_wildfire_dataset**, we need to overlay the WatchDuty data with demographic and economic data. 
+
