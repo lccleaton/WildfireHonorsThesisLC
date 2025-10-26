@@ -77,5 +77,14 @@ core_wildfire_dataset <- evac_zone_status_sel %>%
 View(core_wildfire_dataset)
 ```
 
-Now that we have our **core_wildfire_dataset**, we need to overlay the WatchDuty data with demographic and economic data. 
+We cannot use rows with NA in **display_name** because they lack geometry, and could break spatial joins. Therefore, we can filter these NA's out.
+
+```{r filter_core_wildfire_dataset, eval = FALSE}
+core_wildfire_geo <- core_wildfire_dataset %>%
+  filter(!is.na(display_name))
+View(core_wildfire_geo)
+```
+
+
+Now that we have our **core_wildfire_geo** data, we can overlay it with demographic and economic data. 
 
