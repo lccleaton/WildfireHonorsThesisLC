@@ -422,8 +422,32 @@ filter these NA’s out.</p>
 <pre class="r"><code>core_wildfire_geo &lt;- core_wildfire_dataset %&gt;%
   filter(!is.na(display_name))
 View(core_wildfire_geo)</code></pre>
-<p>Now that we have our <strong>core_wildfire_geo</strong> data, we can
-overlay it with demographic and economic data.</p>
+<p>After joining the selected WatchDuty tables into a single dataset,
+each record now represents a single evacuation status update. This means
+that there can be multiple entries per evacuation zone,
+<strong>uid_v2</strong>, as its status changes over time. Thus we will
+need to summarize those updates into meaningful evacuation
+timelines:</p>
+<pre><code>1. Evacuation start time: the earliest status_date recorded for that zone. 
+2. Evacuation end time: the latest status_date recorded.
+3. Evacuation duration: the time difference between those two points.</code></pre>
+<p>This step outputs one row per evacuation zone per fire. Thus we can
+describe how long communities were under evacuation and visualize the
+temporal progression of the evacuations.</p>
+<pre class="r"><code>evac_timeline &lt;- core_wildfire_geo %&gt;%
+  st_drop_geometry() %&gt;%      
+  group_by(uid_v2) %&gt;%
+  summarise(
+    n_updates = n(),
+    min_date = min(status_date),
+    max_date = max(status_date),
+    diff_hours = as.numeric(difftime(max_date, min_date, units = &quot;hours&quot;))
+  ) %&gt;%
+  arrange(desc(diff_hours))
+
+View(evac_timeline)</code></pre>
+<p>Now that we have all of our data, we can overlay it with demographic
+and economic data.</p>
 
 
 

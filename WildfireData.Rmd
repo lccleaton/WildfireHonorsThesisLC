@@ -5,10 +5,6 @@ date: "2025-10-26"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
-
 ```{r setup_tidyverse, eval=FALSE}
 library(tidyverse)
 ```
@@ -85,6 +81,28 @@ core_wildfire_geo <- core_wildfire_dataset %>%
 View(core_wildfire_geo)
 ```
 
+After joining the selected WatchDuty tables into a single dataset, each record now represents a single evacuation status update. This means that there can be multiple entries per evacuation zone, **uid_v2**, as its status changes over time. Thus we will need to summarize those updates into meaningful evacuation timelines:
 
-Now that we have our **core_wildfire_geo** data, we can overlay it with demographic and economic data. 
+    1. Evacuation start time: the earliest status_date recorded for that zone. 
+    2. Evacuation end time: the latest status_date recorded.
+    3. Evacuation duration: the time difference between those two points.
+
+This step outputs one row per evacuation zone per fire. Thus we can describe how long communities were under evacuation and visualize the temporal progression of the evacuations.
+
+```{r evac_timeline, eval = FALSE}
+evac_timeline <- core_wildfire_geo %>%
+  st_drop_geometry() %>%      
+  group_by(uid_v2) %>%
+  summarise(
+    n_updates = n(),
+    min_date = min(status_date),
+    max_date = max(status_date),
+    diff_hours = as.numeric(difftime(max_date, min_date, units = "hours"))
+  ) %>%
+  arrange(desc(diff_hours))
+
+View(evac_timeline)
+```
+
+Now that we have all of our data, we can overlay it with demographic and economic data. 
 
