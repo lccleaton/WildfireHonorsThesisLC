@@ -5,11 +5,11 @@ date: "2025-10-26"
 output: html_document
 ---
 
-```{r setup_tidyverse, eval=FALSE}
+```{r setup_tidyverse, eval = TRUE}
 library(tidyverse)
 ```
 
-```{r read_files, eval = FALSE}
+```{r read_files, eval = TRUE}
 evac_zone_status <- read_csv("evac_zone_status_geo_event_map.csv")
 evac_zones <- read_csv("evac_zones_gis_evaczone.csv")
 geo_events <- read_csv("geo_events_geoevent.csv")
@@ -39,7 +39,7 @@ Altogether, the "core spatial dataset" brings together the components of the who
 install.packages("sf")
 ```
 
-```{r wildfire_joins, eval = FALSE}
+```{r wildfire_joins, eval = TRUE}
 
 library(sf)
 
@@ -72,10 +72,9 @@ core_wildfire_dataset <- evac_zone_status_sel %>%
 
 We cannot use rows with NA in **display_name** because they lack geometry, and could break spatial joins. Therefore, we can filter these NA's out.
 
-```{r filter_core_wildfire_dataset, eval = FALSE}
+```{r filter_core_wildfire_dataset, eval = TRUE}
 core_wildfire_geo <- core_wildfire_dataset %>%
   filter(!is.na(display_name))
-
 ```
 
 After joining the selected WatchDuty tables into a single dataset, each record now represents a single evacuation status update. This means that there can be multiple entries per evacuation zone, **uid_v2**, as its status changes over time. Thus we will need to summarize those updates into meaningful evacuation timelines:
@@ -88,7 +87,7 @@ After joining the selected WatchDuty tables into a single dataset, each record n
 
 This step outputs one row per evacuation zone per fire. Thus we can describe how long communities were under evacuation and visualize the temporal progression of the evacuations.
 
-```{r evac_timeline, eval = FALSE}
+```{r evac_timeline, eval = TRUE}
 evac_timeline <- core_wildfire_geo %>%
   st_drop_geometry() %>%      
   group_by(uid_v2) %>%
@@ -102,7 +101,155 @@ evac_timeline <- core_wildfire_geo %>%
 
 ```
 
-Next, we can visualize the joined dataset, using leaflet.
+
+Now I need to check the validity of my geom polygons, to ensure I can filter the data and visualize the results.
+
+
+```{r polygon_validity_check, eval = TRUE}
+library(sf)
+
+# Convert the CSV with WKT geometry to sf safely
+evac_zones_sf <- st_as_sf(evac_zones, wkt = "geom", crs = 4326, quiet = TRUE)
+
+# Rename geometry column for clarity
+evac_zones_sf <- evac_zones_sf %>%
+  rename(geometry = geom)
+
+# Fix invalid polygons (degenerate edges, etc.)
+evac_zones_sf <- st_make_valid(evac_zones_sf)
+
+# Drop empty geometries (now works since the column is named correctly)
+evac_zones_sf <- evac_zones_sf %>%
+  filter(!st_is_empty(geometry))
+
+# Sanity check
+print(st_is_valid(evac_zones_sf) %>% table())
+
+```
+
+I have 37324 valid geometries, and 134 invalid geometries, even after conversion. Now I can filter out those invalid geometries.
+
+```{r geometry_filter, eval = TRUE}
+evac_zones_sf <- evac_zones_sf %>%
+  filter(st_is_valid(geometry))
+```
+
+```{r joins_fixed, eval = TRUE}
+evac_zone_status_sel <- evac_zone_status %>%
+  rename(status_date = date_created) %>%
+  select(uid_v2, geo_event_id, status_date)
+
+geo_events_sel <- geo_events %>%
+  rename(geo_event_id = id) %>%
+  select(geo_event_id, name, lat, lng)
+
+evac_zones_sel <- evac_zones_sf %>%
+  select(uid_v2, display_name, geometry)
+
+core_wildfire_geo <- evac_zone_status_sel %>%
+  left_join(geo_events_sel, by = "geo_event_id") %>%
+  left_join(evac_zones_sel, by = "uid_v2") %>%
+  st_as_sf()
+```
+
+
+Next, I wanted to see the distribution of the proportion of all the WatchDuty wildfires. I wanted to see which duration times made up the majority of these evacuations. 
+
+```{r evac_timeline_filter_summary, eval = TRUE}
+evac_timeline <- evac_timeline %>%
+  mutate(diff_hours = as.numeric(diff_hours)) %>%
+  filter(!is.na(diff_hours), diff_hours > 0)
+```
+
+
+```{r evac_timeline_distribution, eval = TRUE}
+library(tidyverse)
+ggplot(evac_timeline, aes(x = diff_hours)) +
+  geom_histogram(
+    aes(y = after_stat(count / sum(count))),
+    bins = 30,
+    fill = "steelblue",
+    color = "white",
+    alpha = 0.7) +
+  labs(
+    title = "Evacuation Duration Distribution",
+    subtitle = "Proportion of all Evacuation Zones",
+    x = "Evacuation Duration (hours)",
+    y = "Proportion of Evacuation Zones"
+  ) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme_minimal()
+```
+
+[explanation of summary statistics]
+As we can see, most of the wildfires were under 3,000 hours. I wanted to see how this overall distribution compares to just wildfires in California.
+
+
+```{r california_filter, eval = TRUE}
+library(sf)
+
+ca_bbox <- st_sfc(
+  st_polygon(list(rbind(
+    c(-125, 32),
+    c(-125, 42),
+    c(-114, 42),
+    c(-114, 32),
+    c(-125, 32)
+  ))),
+  crs = st_crs(core_wildfire_geo)
+)
+
+cali_wildfire_geo <- core_wildfire_geo[st_intersects(core_wildfire_geo, ca_bbox, sparse = FALSE), ]
+```
+
+```{r cali_evac_timeline_distribution, eval = TRUE}
+library(scales)
+
+cali_evac_timeline <- cali_wildfire_geo %>%
+  st_drop_geometry() %>%
+  group_by(uid_v2) %>%
+  summarise(
+    n_updates = n(),
+    min_date = min(status_date),
+    max_date = max(status_date),
+    diff_hours = as.numeric(difftime(max_date, min_date, units = "hours"))
+  ) %>%
+  filter(!is.na(diff_hours), diff_hours > 0)
+
+cali_evac_timeline %>%
+  summarise(
+    n_zones = n(),
+    mean_duration = mean(diff_hours, na.rm = TRUE),
+    median_duration = median(diff_hours, na.rm = TRUE),
+    sd_duration = sd(diff_hours, na.rm = TRUE),
+    min_duration = min(diff_hours, na.rm = TRUE),
+    max_duration = max(diff_hours, na.rm = TRUE),
+    p25 = quantile(diff_hours, 0.25, na.rm = TRUE),
+    p75 = quantile(diff_hours, 0.75, na.rm = TRUE)
+  )
+
+ggplot(cali_evac_timeline, aes(x = diff_hours)) +
+  geom_histogram(
+    aes(y = after_stat(count / sum(count))),   # convert counts to proportions
+    bins = 30,
+    fill = "darkorange",
+    color = "white",
+    alpha = 0.7
+  ) +
+  labs(
+    title = "Evacuation Duration Distribution",
+    subtitle = "Proportion of California Evacuation Zones",
+    x = "Evacuation Duration (hours)",
+    y = "Proportion of Evacuation Zones"
+  ) +
+  scale_y_continuous(labels = percent_format()) +
+  theme_minimal(base_size = 13)
+```
+
+[explanation of summary statistics]
+This distribution is much different. We can see that the California evacuation zones have a much higher evacuation duration on average than the distribution of all locations. We can also see that there are 222 evacuation zones located in California, which is about 49.55% of the total 448 evacuation zones recorded. 
+
+Next, we can visualize the joined dataset, using leaflet. Although California is my place of interest, I was curious about where other fires were located. 
 
 
 ```{r install_leaflet, eval = FALSE}
@@ -123,23 +270,9 @@ leaflet(filter(core_wildfire_geo, name %in% top_fires)) %>%
   )
 ```
 
-This shows that the fires from WatchDuty are from Minnesota (near Duluth, on the western tip of Lake Superior) and California. I will be focusing on California for my research. 
+This shows that the fires from WatchDuty data were located in Minnesota (near Duluth, on the western tip of Lake Superior) and California. 
 
-```{r california_filter, eval = FALSE}
-cali_wildfire <- core_wildfire_geo %>%
-  mutate(geom_evac_zone = st_make_valid(geom_evac_zone))
 
-ca_bbox <- st_sfc(
-  st_polygon(list(rbind(
-    c(-125, 32),  # SW corner
-    c(-125, 42),  # NW corner
-    c(-114, 42),  # NE corner
-    c(-114, 32),  # SE corner
-    c(-125, 32)   # Close the polygon
-  ))),
-  crs = st_crs(cali_wildfire)  # match CRS
-)
-```
 
 
 
