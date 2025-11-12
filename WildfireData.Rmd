@@ -278,7 +278,8 @@ ggplot(evac_timeline_full, aes(x = diff_hours, fill = region)) +
   ) +
   scale_fill_manual(values = c("All Zones" = "steelblue", "California" = "darkorange")) +
   labs(
-    title = "Evacuation Duration Distribution: California vs All Zones",
+    title = "Evacuation Duration Distribution",
+    subtitile = "California vs All Zones",
     x = "Evacuation Duration (hours)",
     y = "Proportion of Evacuation Zones",
     fill = "Region"
