@@ -456,6 +456,19 @@ leaflet(filter(core_wildfire_geo, name %in% top_fires)) %&gt;%
 <p>This shows that the fires from WatchDuty are from Minnesota (near
 Duluth, on the western tip of Lake Superior) and California. I will be
 focusing on California for my research.</p>
+<pre class="r"><code>cali_wildfire &lt;- core_wildfire_geo %&gt;%
+  mutate(geom_evac_zone = st_make_valid(geom_evac_zone))
+
+ca_bbox &lt;- st_sfc(
+  st_polygon(list(rbind(
+    c(-125, 32),  # SW corner
+    c(-125, 42),  # NW corner
+    c(-114, 42),  # NE corner
+    c(-114, 32),  # SE corner
+    c(-125, 32)   # Close the polygon
+  ))),
+  crs = st_crs(cali_wildfire)  # match CRS
+)</code></pre>
 <p>Now that we have all of our data, we can overlay it with demographic
 and economic data.</p>
 
