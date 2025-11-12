@@ -22,24 +22,22 @@ view(evac_zone_status)
 ```{r evac_zones, eval = FALSE}
 view(evac_zones)
 ```
- 
+
 ```{r geo_events, eval = FALSE}
 view(geo_events)
 ```
 
+In order to conduct a temporal and spatial analysis, we will join the **evac_zone_status**, **geo_events**, and **evac_zones** datasets. The 'changelog' datasets are unnecessary for the analysis.
 
-In order to conduct a temporal and spatial analysis, we will join the **evac_zone_status**, **geo_events**, and **evac_zones** datasets. The 'changelog' datasets are unnecessary for the analysis. 
+The first join, **evac_zone_status** and **geo_events** (by geo_event_id), is important because **evac_zone_status** does not include information on the wildfire (name, geographical location, etc.). **evac_zone_status** only tracks the evacuation zone's activity over time, so by joining these two tables, we will be able to see the evacuation status changes associated with a specific wildfire.
 
-The first join, **evac_zone_status** and **geo_events** (by geo_event_id), is important because **evac_zone_status** does not include information on the wildfire (name, geographical location, etc.). **evac_zone_status** only tracks the evacuation zone's activity over time, so by joining these two tables, we will be able to see the evacuation status changes associated with a specific wildfire.  
-
-The second join, **evac_zone_status** and **evac_zones** (by uid_v2), brings in the spatial component. Each evacuation zone's geometry and display name will be attached to its status updates, which means we'll be able to pinpoint the when and where each evacuation occurred. Evacuation boundaries can be visualized, their areas calculated, and they can be overlayed with demographic data. 
+The second join, **evac_zone_status** and **evac_zones** (by uid_v2), brings in the spatial component. Each evacuation zone's geometry and display name will be attached to its status updates, which means we'll be able to pinpoint the when and where each evacuation occurred. Evacuation boundaries can be visualized, their areas calculated, and they can be overlayed with demographic data.
 
 Altogether, the "core spatial dataset" brings together the components of the who, when, and where of wildfire evacuations; which fire the evacuations were associated with, when they were created, and where they occurred.
 
 ```{r install_sf, eval = FALSE}
 install.packages("sf")
 ```
-
 
 ```{r wildfire_joins, eval = FALSE}
 
@@ -70,7 +68,6 @@ core_wildfire_dataset <- evac_zone_status_sel %>%
   left_join(evac_zones_sel, by = "uid_v2") %>%
   st_as_sf()
 
-View(core_wildfire_dataset)
 ```
 
 We cannot use rows with NA in **display_name** because they lack geometry, and could break spatial joins. Therefore, we can filter these NA's out.
@@ -78,14 +75,16 @@ We cannot use rows with NA in **display_name** because they lack geometry, and c
 ```{r filter_core_wildfire_dataset, eval = FALSE}
 core_wildfire_geo <- core_wildfire_dataset %>%
   filter(!is.na(display_name))
-View(core_wildfire_geo)
+
 ```
 
 After joining the selected WatchDuty tables into a single dataset, each record now represents a single evacuation status update. This means that there can be multiple entries per evacuation zone, **uid_v2**, as its status changes over time. Thus we will need to summarize those updates into meaningful evacuation timelines:
 
-    1. Evacuation start time: the earliest status_date recorded for that zone. 
-    2. Evacuation end time: the latest status_date recorded.
-    3. Evacuation duration: the time difference between those two points.
+```         
+1. Evacuation start time: the earliest status_date recorded for that zone. 
+2. Evacuation end time: the latest status_date recorded.
+3. Evacuation duration: the time difference between those two points.
+```
 
 This step outputs one row per evacuation zone per fire. Thus we can describe how long communities were under evacuation and visualize the temporal progression of the evacuations.
 
@@ -101,8 +100,30 @@ evac_timeline <- core_wildfire_geo %>%
   ) %>%
   arrange(desc(diff_hours))
 
-View(evac_timeline)
 ```
 
-Now that we have all of our data, we can overlay it with demographic and economic data. 
+Next, we can visualize the joined dataset, using leaflet.
 
+
+```{r install_leaflet, eval = FALSE}
+install.packages("leaflet")
+```
+
+
+```{r leaflet_joins_visualization, eval = FALSE}
+library(leaflet)
+
+leaflet(filter(core_wildfire_geo, name %in% top_fires)) %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addPolygons(
+    fillColor = ~factor(name),
+    color = "#444",
+    weight = 1,
+    popup = ~paste("<b>Fire:</b>", name, "<br><b>Zone:</b>", display_name)
+  )
+```
+
+This shows that the fires from WatchDuty are from Minnesota (near Duluth, on the western tip of Lake Superior) and California. I will be focusing on California for my research. 
+
+
+Now that we have all of our data, we can overlay it with demographic and economic data.

@@ -413,15 +413,12 @@ evac_zones_sel &lt;- evac_zones %&gt;%
 core_wildfire_dataset &lt;- evac_zone_status_sel %&gt;%
   left_join(geo_events_sel, by = &quot;geo_event_id&quot;) %&gt;%
   left_join(evac_zones_sel, by = &quot;uid_v2&quot;) %&gt;%
-  st_as_sf()
-
-View(core_wildfire_dataset)</code></pre>
+  st_as_sf()</code></pre>
 <p>We cannot use rows with NA in <strong>display_name</strong> because
 they lack geometry, and could break spatial joins. Therefore, we can
 filter these NA’s out.</p>
 <pre class="r"><code>core_wildfire_geo &lt;- core_wildfire_dataset %&gt;%
-  filter(!is.na(display_name))
-View(core_wildfire_geo)</code></pre>
+  filter(!is.na(display_name))</code></pre>
 <p>After joining the selected WatchDuty tables into a single dataset,
 each record now represents a single evacuation status update. This means
 that there can be multiple entries per evacuation zone,
@@ -443,9 +440,22 @@ temporal progression of the evacuations.</p>
     max_date = max(status_date),
     diff_hours = as.numeric(difftime(max_date, min_date, units = &quot;hours&quot;))
   ) %&gt;%
-  arrange(desc(diff_hours))
+  arrange(desc(diff_hours))</code></pre>
+<p>Next, we can visualize the joined dataset, using leaflet.</p>
+<pre class="r"><code>install.packages(&quot;leaflet&quot;)</code></pre>
+<pre class="r"><code>library(leaflet)
 
-View(evac_timeline)</code></pre>
+leaflet(filter(core_wildfire_geo, name %in% top_fires)) %&gt;%
+  addProviderTiles(providers$CartoDB.Positron) %&gt;%
+  addPolygons(
+    fillColor = ~factor(name),
+    color = &quot;#444&quot;,
+    weight = 1,
+    popup = ~paste(&quot;&lt;b&gt;Fire:&lt;/b&gt;&quot;, name, &quot;&lt;br&gt;&lt;b&gt;Zone:&lt;/b&gt;&quot;, display_name)
+  )</code></pre>
+<p>This shows that the fires from WatchDuty are from Minnesota (near
+Duluth, on the western tip of Lake Superior) and California. I will be
+focusing on California for my research.</p>
 <p>Now that we have all of our data, we can overlay it with demographic
 and economic data.</p>
 
