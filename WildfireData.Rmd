@@ -539,3 +539,152 @@ evac_population_summary
 
 Now we can visualize it on a map using color to show higher/lower population affected, show community impact, and combine with evacuation duration to estimate “person-hours affected,” as a measure of community burden.
 
+```{r population_heatmap, eval = FALSE}
+library(leaflet)
+
+pal <- colorNumeric("YlOrRd", domain = evac_population_summary$affected_population)
+
+leaflet(evac_population_summary) %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addPolygons(
+    fillColor = ~pal(affected_population),
+    fillOpacity = 0.7,
+    color = "#444",
+    weight = 0.5,
+    popup = ~paste0(display_name, "<br>Population: ", affected_population)
+  ) %>%
+  addLegend(
+    pal = pal,
+    values = ~affected_population,
+    title = "Population Affected",
+    opacity = 0.7
+  )
+```
+
+```{r population_duration, eval = TRUE}
+library(tidyverse)
+
+# Join the population summary with evacuation duration
+evac_impact <- evac_population_summary %>%
+  left_join(
+    cali_longest_zones_sf %>% 
+      st_drop_geometry() %>% 
+      select(display_name, duration_hours),
+    by = "display_name"
+  ) %>%
+  mutate(
+    person_hours_affected = affected_population * duration_hours
+  ) %>%
+  arrange(desc(person_hours_affected))
+
+# View top impacted zones
+head(evac_impact)
+```
+
+
+```{r population_duration_heatmap, eval = FALSE}
+
+library(leaflet)
+
+# Define color palette based on evacuation duration
+pal_duration <- colorNumeric("YlOrRd", domain = evac_impact$duration_hours)
+
+leaflet(evac_impact) %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addPolygons(
+    fillColor = ~pal_duration(duration_hours),  # color by duration
+    fillOpacity = 0.7,
+    color = "#444",
+    weight = 0.5,
+    popup = ~paste0(
+      "<b>Zone:</b> ", display_name, "<br>",
+      "<b>Duration (hrs):</b> ", round(duration_hours, 1), "<br>",
+      "<b>Population:</b> ", affected_population
+    )
+  ) %>%
+  addLegend(
+    pal = pal_duration,
+    values = ~duration_hours,
+    title = "Evacuation Duration (hrs)",
+    opacity = 0.7
+  )
+
+```
+
+This heatmap-style map where zones with high numbers of people and long durations stand out shows the community impact. 
+
+```{r population_duration_table, eval = FALSE}
+library(tidyverse)
+
+# Create summary table sorted by population affected
+evac_summary_table <- evac_impact %>%
+  st_drop_geometry() %>%  # remove geometry for table display
+  select(
+    Zone = display_name,
+    Duration_Hours = duration_hours,
+    Population_Affected = affected_population
+  ) %>%
+  arrange(desc(Population_Affected))  # sort by population descending
+
+# View the table
+evac_summary_table
+```
+
+Now I want to combine my top 10% evacuation zones in California by population with duration and person-hours, and then I'll visualize it clearly. 
+
+```{r population_duration_top10, eval = TRUE}
+
+library(tidyverse)
+
+# Top 10% zones by population affected
+top10pct_evac_summary <- evac_impact %>%
+  st_drop_geometry() %>%
+  slice_max(affected_population, prop = 0.10) %>%  # use original column name
+  mutate(
+    Person_Hours_Affected = affected_population * duration_hours
+  ) %>%
+  select(
+    Zone = display_name,
+    Duration_Hours = duration_hours,
+    Population_Affected = affected_population,
+    Person_Hours_Affected
+  ) %>%
+  arrange(desc(Population_Affected))
+
+# View table
+top10pct_evac_summary
+```
+
+
+```{r population_duration_top10_barchart, eval = TRUE}
+library(ggplot2)
+library(tidyverse)
+library(scales)
+
+# Summarize by zone first to remove duplicates
+evac_summary <- evac_impact %>%
+  group_by(display_name, duration_hours) %>%
+  summarise(
+    affected_population = sum(affected_population, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(affected_population)) %>%
+  mutate(
+    Zone_Label = factor(display_name, levels = display_name)
+  )
+
+# Plot
+ggplot(evac_summary, aes(x = affected_population, y = Zone_Label, fill = duration_hours)) +
+  geom_col() +
+  scale_fill_gradient(low = "lightblue", high = "darkblue", name = "Duration (hrs)") +
+  scale_x_continuous(labels = comma) +
+  labs(
+    title = "Evacuation Zones by Population Affected",
+    subtitle = "In California",
+    x = "Population Affected",
+    y = "Evacuation Zone"
+  ) +
+  theme_minimal(base_size = 13)
+
+```
+
