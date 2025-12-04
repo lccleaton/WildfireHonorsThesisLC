@@ -461,5 +461,22 @@ leaflet(cali_longest_zones_sf) %>%
   )
 ```
 
+The analysis focused on the top 10% of evacuation zones by duration in California. These zones represent communities most disrupted by wildfires, regardless of the specific fire event. By examining evacuation durations and spatial extent, we can approximate the impact on residents, workers, and small businesses.
 
-Now that we have all of our data, we can overlay it with demographic and economic data.
+
+```{r tiger_read, eval = TRUE}
+# Load California block groups
+ca_bg <- st_read("tl_2025_06_bg.shp")
+
+# Quick check
+ca_bg
+plot(st_geometry(ca_bg))  # shows all polygons
+```
+
+How the TIGER/Line shapefile helps: TIGER/Line gives you polygons for every block group. Each polygon is a small area with a GEOID that can be matched to population or economic data from ACS. (a grid over California that tells you where people live.)
+
+
+
+
+
+
