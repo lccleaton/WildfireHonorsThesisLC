@@ -887,6 +887,132 @@ ca_bg</code></pre>
 every block group. Each polygon is a small area with a GEOID that can be
 matched to population or economic data from ACS. (a grid over California
 that tells you where people live.)</p>
+<p>Now we can overlay census data to know roughly how many people were
+potentially affected in each of the top evacuation zones in
+California.</p>
+<pre class="r"><code>library(tidycensus)
+
+pop_ca_bg &lt;- get_acs(
+  geography = &quot;block group&quot;,
+  variables = &quot;B01003_001&quot;,  # total population
+  state = &quot;CA&quot;,
+  year = 2021,
+  survey = &quot;acs5&quot;,
+  geometry = FALSE
+)</code></pre>
+<pre><code>## Getting data from the 2017-2021 5-year ACS</code></pre>
+<pre><code>## Warning: • You have not set a Census API key. Users without a key are limited to 500
+## queries per day and may experience performance limitations.
+## ℹ For best results, get a Census API key at
+## http://api.census.gov/data/key_signup.html and then supply the key to the
+## `census_api_key()` function to use it throughout your tidycensus session.
+## This warning is displayed once per session.</code></pre>
+<pre class="r"><code># pop_ca_bg now has GEOID + total population (estimate)
+head(pop_ca_bg)</code></pre>
+<pre><code>## # A tibble: 6 × 5
+##   GEOID        NAME                                      variable estimate   moe
+##   &lt;chr&gt;        &lt;chr&gt;                                     &lt;chr&gt;       &lt;dbl&gt; &lt;dbl&gt;
+## 1 060014001001 Block Group 1, Census Tract 4001, Alamed… B01003_…     1963   457
+## 2 060014001002 Block Group 2, Census Tract 4001, Alamed… B01003_…     1361   273
+## 3 060014002001 Block Group 1, Census Tract 4002, Alamed… B01003_…     1029   151
+## 4 060014002002 Block Group 2, Census Tract 4002, Alamed… B01003_…     1009   214
+## 5 060014003001 Block Group 1, Census Tract 4003, Alamed… B01003_…     1122   301
+## 6 060014003002 Block Group 2, Census Tract 4003, Alamed… B01003_…     1623   397</code></pre>
+<pre class="r"><code>library(tidyverse)
+
+# Make sure GEOID columns are character
+ca_bg$GEOID &lt;- as.character(ca_bg$GEOID)
+pop_ca_bg$GEOID &lt;- as.character(pop_ca_bg$GEOID)
+
+# Join population
+ca_bg_pop &lt;- ca_bg %&gt;%
+  left_join(pop_ca_bg %&gt;% select(GEOID, estimate), by = &quot;GEOID&quot;)
+
+# Check
+head(ca_bg_pop)</code></pre>
+<pre><code>## Simple feature collection with 6 features and 14 fields
+## Geometry type: MULTIPOLYGON
+## Dimension:     XY
+## Bounding box:  xmin: -121.9039 ymin: 37.22778 xmax: -121.7988 ymax: 37.46804
+## Geodetic CRS:  NAD83
+##   STATEFP COUNTYFP TRACTCE BLKGRPCE        GEOID               GEOIDFQ
+## 1      06      085  512056        1 060855120561 1500000US060855120561
+## 2      06      085  503222        1 060855032221 1500000US060855032221
+## 3      06      085  504424        3 060855044243 1500000US060855044243
+## 4      06      085  512059        2 060855120592 1500000US060855120592
+## 5      06      085  504002        3 060855040023 1500000US060855040023
+## 6      06      085  503802        3 060855038023 1500000US060855038023
+##        NAMELSAD MTFCC FUNCSTAT   ALAND AWATER    INTPTLAT     INTPTLON estimate
+## 1 Block Group 1 G5030        S  630075      0 +37.2704528 -121.8076171     2748
+## 2 Block Group 1 G5030        S  330743      0 +37.2964056 -121.8427665     3922
+## 3 Block Group 3 G5030        S 1052711      0 +37.4575935 -121.8955805      988
+## 4 Block Group 2 G5030        S  366606      0 +37.2318978 -121.8016962     1748
+## 5 Block Group 3 G5030        S  373230      0 +37.3508523 -121.8317109     2514
+## 6 Block Group 3 G5030        S  421521      0 +37.3888311 -121.8355612     1699
+##                         geometry
+## 1 MULTIPOLYGON (((-121.8142 3...
+## 2 MULTIPOLYGON (((-121.8484 3...
+## 3 MULTIPOLYGON (((-121.9039 3...
+## 4 MULTIPOLYGON (((-121.8039 3...
+## 5 MULTIPOLYGON (((-121.8368 3...
+## 6 MULTIPOLYGON (((-121.8408 3...</code></pre>
+<pre class="r"><code>library(tidyverse)
+
+# Assume these are your objects:
+# ca_bg_pop -&gt; block groups with population
+# cali_longest_zones_sf -&gt; evacuation zones polygons
+
+# Make sure both have the same CRS
+st_crs(cali_longest_zones_sf) &lt;- st_crs(ca_bg_pop)</code></pre>
+<pre><code>## Warning: st_crs&lt;- : replacing crs does not reproject data; use st_transform for
+## that</code></pre>
+<pre class="r"><code># Intersect block groups with evacuation zones
+evac_pop_overlay &lt;- st_intersection(
+  cali_longest_zones_sf, 
+  ca_bg_pop
+)</code></pre>
+<pre><code>## Warning: attribute variables are assumed to be spatially constant throughout
+## all geometries</code></pre>
+<pre class="r"><code># Estimate population affected per zone
+evac_population_summary &lt;- evac_pop_overlay %&gt;%
+  group_by(display_name) %&gt;%  # evacuation zone
+  summarise(
+    affected_population = sum(estimate, na.rm = TRUE)
+  ) %&gt;%
+  arrange(desc(affected_population))
+
+# Check results
+evac_population_summary</code></pre>
+<pre><code>## Simple feature collection with 18 features and 2 fields
+## Geometry type: POLYGON
+## Dimension:     XY
+## Bounding box:  xmin: -123.3282 ymin: 34.56369 xmax: -118.6738 ymax: 41.93236
+## Geodetic CRS:  NAD83
+## # A tibble: 18 × 3
+##    display_name      affected_population                                geometry
+##    &lt;chr&gt;                           &lt;dbl&gt;                           &lt;POLYGON [°]&gt;
+##  1 GOR-HUNGRYVALLEY                25803 ((-118.7531 34.64923, -118.7531 34.649…
+##  2 CAS-PARADISERANCH               17733 ((-118.6839 34.5637, -118.6834 34.5637…
+##  3 SIS-3315                        15580 ((-122.4772 41.87383, -122.477 41.8735…
+##  4 SIS-3413                        12136 ((-122.4626 41.85739, -122.4572 41.856…
+##  5 SIS-3312                         9102 ((-122.4967 41.88954, -122.497 41.8884…
+##  6 SIS-3208                         8136 ((-122.464 41.9033, -122.4639 41.90336…
+##  7 SIS-3211                         8136 ((-122.4637 41.90353, -122.4639 41.903…
+##  8 SIS-3318                         7404 ((-122.411 41.88343, -122.4087 41.8844…
+##  9 K31                              7362 ((-119.0053 36.86057, -119.0019 36.857…
+## 10 K40                              6676 ((-119.2022 36.87382, -119.1971 36.874…
+## 11 K41                              4842 ((-119.2417 36.8852, -119.24 36.88559,…
+## 12 CCU-152-A                        4156 ((-120.6713 37.96216, -120.6764 37.977…
+## 13 K166                             3652 ((-119.2451 36.96983, -119.2495 36.953…
+## 14 K30                              3652 ((-119.1973 36.92898, -119.1932 36.929…
+## 15 SIS-3416                         2806 ((-122.2796 41.75656, -122.2776 41.758…
+## 16 K29                              2751 ((-119.1537 37.061, -119.1335 37.08359…
+## 17 K76                              1818 ((-119.3134 36.91742, -119.3135 36.912…
+## 18 SIS-1004                         1448 ((-123.241 41.86016, -123.2405 41.8601…</code></pre>
+<p>Now we can visualize it on a map using color to show higher/lower
+population affected, show community impact, and combine with evacuation
+duration to estimate “person-hours affected,” as a measure of community
+burden.</p>
 
 
 

@@ -475,8 +475,67 @@ plot(st_geometry(ca_bg))  # shows all polygons
 
 How the TIGER/Line shapefile helps: TIGER/Line gives you polygons for every block group. Each polygon is a small area with a GEOID that can be matched to population or economic data from ACS. (a grid over California that tells you where people live.)
 
+Now we can overlay census data to know roughly how many people were potentially affected in each of the top evacuation zones in California. 
+
+```{r acs_population_data, eval = TRUE}
+library(tidycensus)
+
+pop_ca_bg <- get_acs(
+  geography = "block group",
+  variables = "B01003_001",  # total population
+  state = "CA",
+  year = 2021,
+  survey = "acs5",
+  geometry = FALSE
+)
+
+# pop_ca_bg now has GEOID + total population (estimate)
+head(pop_ca_bg)
+```
+
+```{r acs_tiger_join, eval = TRUE}
+library(tidyverse)
+
+# Make sure GEOID columns are character
+ca_bg$GEOID <- as.character(ca_bg$GEOID)
+pop_ca_bg$GEOID <- as.character(pop_ca_bg$GEOID)
+
+# Join population
+ca_bg_pop <- ca_bg %>%
+  left_join(pop_ca_bg %>% select(GEOID, estimate), by = "GEOID")
+
+# Check
+head(ca_bg_pop)
+```
 
 
+```{r evac_zone_populations, eval = TRUE}
+library(tidyverse)
 
+# Assume these are your objects:
+# ca_bg_pop -> block groups with population
+# cali_longest_zones_sf -> evacuation zones polygons
 
+# Make sure both have the same CRS
+st_crs(cali_longest_zones_sf) <- st_crs(ca_bg_pop)
+
+# Intersect block groups with evacuation zones
+evac_pop_overlay <- st_intersection(
+  cali_longest_zones_sf, 
+  ca_bg_pop
+)
+
+# Estimate population affected per zone
+evac_population_summary <- evac_pop_overlay %>%
+  group_by(display_name) %>%  # evacuation zone
+  summarise(
+    affected_population = sum(estimate, na.rm = TRUE)
+  ) %>%
+  arrange(desc(affected_population))
+
+# Check results
+evac_population_summary
+```
+
+Now we can visualize it on a map using color to show higher/lower population affected, show community impact, and combine with evacuation duration to estimate “person-hours affected,” as a measure of community burden.
 
