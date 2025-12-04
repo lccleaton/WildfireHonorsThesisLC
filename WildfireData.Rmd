@@ -122,7 +122,7 @@ evac_zones_sf <- st_make_valid(evac_zones_sf)
 evac_zones_sf <- evac_zones_sf %>%
   filter(!st_is_empty(geometry))
 
-# Sanity check
+# Check
 print(st_is_valid(evac_zones_sf) %>% table())
 
 ```
@@ -242,9 +242,9 @@ ggplot(cali_evac_timeline, aes(x = diff_hours)) +
   ) +
   labs(
     title = "Evacuation Duration Distribution",
-    subtitle = "Proportion of California Evacuation Zones",
+    subtitle = "California Evacuation Zones",
     x = "Evacuation Duration (hours)",
-    y = "Proportion of Evacuation Zones"
+    y = "Percentage of California Evacuation Zones"
   ) +
   scale_y_continuous(labels = percent_format()) +
   theme_minimal(base_size = 13)
@@ -281,7 +281,7 @@ ggplot(evac_timeline_full, aes(x = diff_hours, fill = region)) +
     title = "Evacuation Duration Distribution",
     subtitile = "California vs All Zones",
     x = "Evacuation Duration (hours)",
-    y = "Proportion of Evacuation Zones",
+    y = "Percentage of Evacuation Zones",
     fill = "Region"
   ) +
   scale_y_continuous(labels = percent_format()) +
@@ -314,8 +314,145 @@ leaflet(filter(core_wildfire_geo, name %in% top_fires)) %>%
 This shows that the fires from WatchDuty data were located in Minnesota (near Duluth, on the western tip of Lake Superior) and California. 
 
 
+Next I wanted to observe the distribution of evacuation durations as a heatmap. 
+
+```{r attach_diff_hours, eval = TRUE} 
+core_wildfire_geo_time <- core_wildfire_geo %>%
+  left_join(evac_timeline %>% select(uid_v2, diff_hours), by = "uid_v2") %>%
+  filter(!is.na(diff_hours))
+```
+
+```{r nationwide_heatmap_duration, eval = FALSE}
+library(leaflet)
+
+pal <- colorNumeric(
+  palette = "YlOrRd",
+  domain = core_wildfire_geo_time$diff_hours
+)
+
+leaflet(core_wildfire_geo_time) %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addPolygons(
+    fillColor = ~pal(diff_hours),
+    fillOpacity = 0.7,
+    color = "#444",
+    weight = 0.3,
+    popup = ~paste0(
+      "<b>Fire:</b> ", name,
+      "<br><b>Zone:</b> ", display_name,
+      "<br><b>Duration (hours):</b> ", round(diff_hours, 1)
+    )
+  ) %>%
+  addLegend(
+    pal = pal,
+    values = ~diff_hours,
+    title = "Evacuation Duration (Hours)",
+    opacity = 0.7
+  )
+```
 
 
+```{r add_time_cali, eval = TRUE}
+cali_wildfire_geo_time <- cali_wildfire_geo %>%
+  left_join(cali_evac_timeline %>% select(uid_v2, diff_hours), by = "uid_v2") %>%
+  filter(!is.na(diff_hours))
+```
+
+```{r cali_heatmap_duration, eval = FALSE}
+pal_ca <- colorNumeric(
+  palette = "YlOrRd",
+  domain = cali_wildfire_geo_time$diff_hours
+)
+
+leaflet(cali_wildfire_geo_time) %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addPolygons(
+    fillColor = ~pal_ca(diff_hours),
+    fillOpacity = 0.7,
+    color = "#444",
+    weight = 0.5,
+    popup = ~paste0(
+      "<b>Fire:</b> ", name,
+      "<br><b>Zone:</b> ", display_name,
+      "<br><b>Duration (hours):</b> ", round(diff_hours, 1)
+    )
+  ) %>%
+  addLegend(
+    pal = pal_ca,
+    values = ~diff_hours,
+    title = "CA Evacuation Duration (Hours)",
+    opacity = 0.7
+  )
+```
+
+Then I wanted to see where only the longest evacuation durations occurred in California. (The top 10%)
+
+```{r filter_out_na, eval = TRUE}
+# Clean out NA fire names first
+cali_wildfire_geo_time_clean <- cali_wildfire_geo_time %>%
+  filter(!is.na(name))
+
+# Compute 90th percentile threshold from CLEAN data
+longest_threshold <- quantile(
+  cali_wildfire_geo_time_clean$diff_hours,
+  0.90,
+  na.rm = TRUE
+)
+
+# Keep only the longest evacuations (top 10%)
+cali_longest <- cali_wildfire_geo_time_clean %>%
+  filter(diff_hours >= longest_threshold)
+
+# Sanity check: should return 0
+sum(is.na(cali_longest$name))
+```
+
+
+```{r longest_cali_threshold_heatmap, eval = FALSE}
+
+leaflet(cali_longest) %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addPolygons(
+    fillColor = "red",
+    fillOpacity = 0.8,
+    color = "#222",
+    weight = 1,
+    popup = ~paste0(
+      "<b>Fire:</b> ", name,
+      "<br><b>Zone:</b> ", display_name,
+      "<br><b>Duration (hours):</b> ", round(diff_hours, 1)
+    )
+  )
+```
+
+
+```{r longest_cali_threshold_chart, eval = TRUE}
+cali_longest_df <- cali_longest %>%
+  st_drop_geometry()
+
+ggplot(cali_longest_df,
+       aes(y = reorder(name, diff_hours),
+           x = diff_hours)) +
+  geom_point(color = "firebrick", size = 3) +
+  labs(
+    title = "Top 10% Longest Evacuations in California",
+    subtitle = "Ranked by Fire",
+    x = "Evacuation Duration (Hours)",
+    y = "Fire Name"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+
+```{r cali_longest_table, eval = TRUE}
+cali_longest_df %>%
+  select(
+    Fire = name,
+    Zone = display_name,
+    Duration_Hours = diff_hours
+  ) %>%
+  arrange(desc(Duration_Hours))
+```
 
 
 Now that we have all of our data, we can overlay it with demographic and economic data.
