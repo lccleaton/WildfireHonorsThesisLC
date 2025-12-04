@@ -385,73 +385,80 @@ leaflet(cali_wildfire_geo_time) %>%
   )
 ```
 
-Then I wanted to see where only the longest evacuation durations occurred in California. (The top 10%)
+Then I wanted to see which zones in California had the longest evacuation durations. (The top 10%)
 
-```{r filter_out_na, eval = TRUE}
-# Clean out NA fire names first
+```{r longest_evacuation_cali, eval = TRUE}
 cali_wildfire_geo_time_clean <- cali_wildfire_geo_time %>%
-  filter(!is.na(name))
+  filter(!is.na(name), !is.na(display_name))  
 
-# Compute 90th percentile threshold from CLEAN data
-longest_threshold <- quantile(
-  cali_wildfire_geo_time_clean$diff_hours,
-  0.90,
-  na.rm = TRUE
-)
+# 90th percentile threshold for durations
+longest_threshold <- quantile(cali_wildfire_geo_time_clean$diff_hours, 0.90, na.rm = TRUE)
 
-# Keep only the longest evacuations (top 10%)
-cali_longest <- cali_wildfire_geo_time_clean %>%
-  filter(diff_hours >= longest_threshold)
 
-# Sanity check: should return 0
-sum(is.na(cali_longest$name))
+# Filter only the longest evacuations (top 10%) by zone
+
+cali_longest_zones <- cali_wildfire_geo_time_clean %>%
+  group_by(uid_v2, display_name) %>%     
+  summarise(
+    fire_name = first(name),             # fire name for reference
+    duration_hours = max(diff_hours)     
+  ) %>%
+  ungroup() %>%
+  filter(duration_hours >= longest_threshold) %>%
+  arrange(desc(duration_hours))
+
+
+# Table of top longest zones
+
+cali_longest_table <- cali_longest_zones %>%
+  select(
+    Fire = fire_name,
+    Zone = display_name,
+    Duration_Hours = duration_hours
+  )
+
+# View top 15 zones
+head(cali_longest_table, 15)
+
+# Map the longest zones in California
+
+library(leaflet)
+
+# Join back with the geometry from your original CA dataset
+cali_longest_zones_sf <- cali_wildfire_geo_time_clean %>%
+  filter(uid_v2 %in% cali_longest_zones$uid_v2) %>%
+  group_by(uid_v2, display_name, name) %>%
+  summarise(duration_hours = max(diff_hours)) %>%
+  st_as_sf()
+
 ```
 
+```{r longest_cali_heatmap, eval=FALSE}
+# Create heatmap-style leaflet map
+pal_ca <- colorNumeric(
+  palette = "Blues",
+  domain = cali_longest_zones_sf$duration_hours
+)
 
-```{r longest_cali_threshold_heatmap, eval = FALSE}
-
-leaflet(cali_longest) %>%
+leaflet(cali_longest_zones_sf) %>%
   addProviderTiles(providers$CartoDB.Positron) %>%
   addPolygons(
-    fillColor = "red",
+    fillColor = ~pal_ca(duration_hours),
     fillOpacity = 0.8,
     color = "#222",
     weight = 1,
     popup = ~paste0(
       "<b>Fire:</b> ", name,
       "<br><b>Zone:</b> ", display_name,
-      "<br><b>Duration (hours):</b> ", round(diff_hours, 1)
+      "<br><b>Duration (hours):</b> ", round(duration_hours, 1)
     )
-  )
-```
-
-
-```{r longest_cali_threshold_chart, eval = TRUE}
-cali_longest_df <- cali_longest %>%
-  st_drop_geometry()
-
-ggplot(cali_longest_df,
-       aes(y = reorder(name, diff_hours),
-           x = diff_hours)) +
-  geom_point(color = "firebrick", size = 3) +
-  labs(
-    title = "Top 10% Longest Evacuations in California",
-    subtitle = "Ranked by Fire",
-    x = "Evacuation Duration (Hours)",
-    y = "Fire Name"
-  ) +
-  theme_minimal(base_size = 12)
-```
-
-
-```{r cali_longest_table, eval = TRUE}
-cali_longest_df %>%
-  select(
-    Fire = name,
-    Zone = display_name,
-    Duration_Hours = diff_hours
   ) %>%
-  arrange(desc(Duration_Hours))
+  addLegend(
+    pal = pal_ca,
+    values = ~duration_hours,
+    title = "Evacuation Duration (Hours)",
+    opacity = 0.7
+  )
 ```
 
 
