@@ -537,7 +537,7 @@ evac_population_summary <- evac_pop_overlay %>%
 evac_population_summary
 ```
 
-Now we can visualize it on a map using color to show higher/lower population affected, show community impact, and combine with evacuation duration to estimate “person-hours affected,” as a measure of community burden.
+Now we can visualize it on a map using color to show higher/lower population affected, show community impact, and combine with evacuation duration to estimate the "Cumulative Population Exposure" metric as a measure of community burden.
 
 ```{r population_heatmap, eval = FALSE}
 library(leaflet)
@@ -573,9 +573,9 @@ evac_impact <- evac_population_summary %>%
     by = "display_name"
   ) %>%
   mutate(
-    person_hours_affected = affected_population * duration_hours
+    cumulative_population_exposure = affected_population * duration_hours
   ) %>%
-  arrange(desc(person_hours_affected))
+  arrange(desc(cumulative_population_exposure))
 
 # View top impacted zones
 head(evac_impact)
@@ -630,7 +630,7 @@ evac_summary_table <- evac_impact %>%
 evac_summary_table
 ```
 
-Now I want to combine my top 10% evacuation zones in California by population with duration and person-hours, and then I'll visualize it clearly. 
+Now I want to combine my top 10% evacuation zones in California by population with duration and "Cumulative Population Exposure", and then I'll visualize it clearly. 
 
 ```{r population_duration_top10, eval = TRUE}
 
@@ -641,13 +641,13 @@ top10pct_evac_summary <- evac_impact %>%
   st_drop_geometry() %>%
   slice_max(affected_population, prop = 0.10) %>%  # use original column name
   mutate(
-    Person_Hours_Affected = affected_population * duration_hours
+    Cumulative_Population_Exposure = affected_population * duration_hours
   ) %>%
   select(
     Zone = display_name,
     Duration_Hours = duration_hours,
     Population_Affected = affected_population,
-    Person_Hours_Affected
+    Cumulative_Population_Exposure
   ) %>%
   arrange(desc(Population_Affected))
 

@@ -1011,8 +1011,8 @@ evac_population_summary</code></pre>
 ## 18 SIS-1004                         1448 ((-123.241 41.86016, -123.2405 41.8601…</code></pre>
 <p>Now we can visualize it on a map using color to show higher/lower
 population affected, show community impact, and combine with evacuation
-duration to estimate “person-hours affected,” as a measure of community
-burden.</p>
+duration to estimate the “Cumulative Population Exposure” metric as a
+measure of community burden.</p>
 <pre class="r"><code>library(leaflet)
 
 pal &lt;- colorNumeric(&quot;YlOrRd&quot;, domain = evac_population_summary$affected_population)
@@ -1043,9 +1043,9 @@ evac_impact &lt;- evac_population_summary %&gt;%
     by = &quot;display_name&quot;
   ) %&gt;%
   mutate(
-    person_hours_affected = affected_population * duration_hours
+    cumulative_population_exposure = affected_population * duration_hours
   ) %&gt;%
-  arrange(desc(person_hours_affected))</code></pre>
+  arrange(desc(cumulative_population_exposure))</code></pre>
 <pre><code>## Adding missing grouping variables: `uid_v2`</code></pre>
 <pre class="r"><code># View top impacted zones
 head(evac_impact)</code></pre>
@@ -1063,7 +1063,8 @@ head(evac_impact)</code></pre>
 ## 4 CAS-PARADISERANCH               17733 ((-118.6839 34.5637, -118.6834 3… los_a…
 ## 5 CAS-PARADISERANCH               17733 ((-118.6839 34.5637, -118.6834 3… los_a…
 ## 6 CAS-PARADISERANCH               17733 ((-118.6839 34.5637, -118.6834 3… los_a…
-## # ℹ 2 more variables: duration_hours &lt;dbl&gt;, person_hours_affected &lt;dbl&gt;</code></pre>
+## # ℹ 2 more variables: duration_hours &lt;dbl&gt;,
+## #   cumulative_population_exposure &lt;dbl&gt;</code></pre>
 <pre class="r"><code>library(leaflet)
 
 # Define color palette based on evacuation duration
@@ -1105,8 +1106,8 @@ evac_summary_table &lt;- evac_impact %&gt;%
 # View the table
 evac_summary_table</code></pre>
 <p>Now I want to combine my top 10% evacuation zones in California by
-population with duration and person-hours, and then I’ll visualize it
-clearly.</p>
+population with duration and “Cumulative Population Exposure”, and then
+I’ll visualize it clearly.</p>
 <pre class="r"><code>library(tidyverse)
 
 # Top 10% zones by population affected
@@ -1114,27 +1115,28 @@ top10pct_evac_summary &lt;- evac_impact %&gt;%
   st_drop_geometry() %&gt;%
   slice_max(affected_population, prop = 0.10) %&gt;%  # use original column name
   mutate(
-    Person_Hours_Affected = affected_population * duration_hours
+    Cumulative_Population_Exposure = affected_population * duration_hours
   ) %&gt;%
   select(
     Zone = display_name,
     Duration_Hours = duration_hours,
     Population_Affected = affected_population,
-    Person_Hours_Affected
+    Cumulative_Population_Exposure
   ) %&gt;%
   arrange(desc(Population_Affected))
 
 # View table
 top10pct_evac_summary</code></pre>
 <pre><code>## # A tibble: 6 × 4
-##   Zone              Duration_Hours Population_Affected Person_Hours_Affected
-##   &lt;chr&gt;                      &lt;dbl&gt;               &lt;dbl&gt;                 &lt;dbl&gt;
-## 1 GOR-HUNGRYVALLEY          10184.               25803            262785187.
-## 2 GOR-HUNGRYVALLEY          10184.               25803            262785187.
-## 3 GOR-HUNGRYVALLEY          10184.               25803            262785187.
-## 4 CAS-PARADISERANCH         10182.               17733            180563776.
-## 5 CAS-PARADISERANCH         10182.               17733            180563776.
-## 6 CAS-PARADISERANCH         10182.               17733            180563776.</code></pre>
+##   Zone              Duration_Hours Population_Affected Cumulative_Population_E…¹
+##   &lt;chr&gt;                      &lt;dbl&gt;               &lt;dbl&gt;                     &lt;dbl&gt;
+## 1 GOR-HUNGRYVALLEY          10184.               25803                262785187.
+## 2 GOR-HUNGRYVALLEY          10184.               25803                262785187.
+## 3 GOR-HUNGRYVALLEY          10184.               25803                262785187.
+## 4 CAS-PARADISERANCH         10182.               17733                180563776.
+## 5 CAS-PARADISERANCH         10182.               17733                180563776.
+## 6 CAS-PARADISERANCH         10182.               17733                180563776.
+## # ℹ abbreviated name: ¹​Cumulative_Population_Exposure</code></pre>
 <pre class="r"><code>library(ggplot2)
 library(tidyverse)
 library(scales)
