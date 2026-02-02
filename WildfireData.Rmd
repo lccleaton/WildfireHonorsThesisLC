@@ -722,3 +722,200 @@ ggplot(evac_summary,
   theme_minimal(base_size = 13)
 
 ```
+
+Next, the median household income for all California block groups was obtained from the U.S. Census site.
+
+B19013_001E was being read as character, but we need it to be numeric for our calculations. Also, there were some NAs, so those were carefully removed. 
+
+Next, we need to link the cleaned ACS income data to the evacuation zones. To do this we will
+
+1. Link ACS median income to each evacuation zone using block group polygons.
+2. Aggregate income at the zone level (mean income of affect block groups).
+3. Rank zones to see which communities are most economically affected.
+
+```{r check_col_names_evac_zones, eval = TRUE}
+colnames(evac_zones_sf)
+```
+
+
+```{r median_household_income_evacuation_zone_integration, eval = TRUE}
+
+library(sf)
+library(dplyr)
+library(tidycensus)
+
+# Step 1: Load CA block groups
+ca_bg <- st_read("tl_2025_06_bg.shp")
+
+# Step 2: Transform to WGS84 (EPSG:4326)
+ca_bg <- st_transform(ca_bg, 4326)
+
+# Step 3: Pull median household income from ACS
+acs_income <- get_acs(
+  geography = "block group",
+  variables = "B19013_001",
+  state = "CA",
+  year = 2021,
+  survey = "acs5",
+  geometry = FALSE
+)
+
+# Step 4: Clean ACS income
+acs_income_clean <- acs_income %>%
+  select(GEOID, median_income = estimate) %>%
+  filter(!is.na(median_income)) %>%
+  mutate(median_income = as.numeric(median_income))
+
+# Step 5: Join ACS income to CA block groups
+ca_bg$GEOID <- as.character(ca_bg$GEOID)
+acs_income_clean$GEOID <- as.character(acs_income_clean$GEOID)
+
+ca_bg_income <- ca_bg %>%
+  left_join(acs_income_clean, by = "GEOID")
+
+# Step 6: Transform evacuation zones to match CA block groups
+cali_longest_zones_sf <- st_transform(cali_longest_zones_sf, st_crs(ca_bg_income))
+
+```
+The shapefile originally used NAD83 (common for TIGER/Line), but the other data (cali_longest_zones_sf) is in WGS84 (EPSG:4326).
+
+st_transform() reprojects the polygons, converting coordinates so everything lines up properly on a map.
+
+We queried the ACS 5-year survey for median household income for all block groups in California. We only kept the GEOID and renamed estimate as median_income. NAs were removed, and median_income was converted to numeric. 
+
+Income data was attached to each blcok group polygon by GEOID, and teh evacuation zones were reprojected to match the CRS of the block groups. 
+
+Next, we will calculate the median household income per evacuation zone and rank the zones based on their income. 
+
+```{r top_economic_disruption_zones, eval = TRUE}
+
+library(dplyr)
+library(sf)
+
+# --- Step 1: Ensure CRS matches (just in case) ---
+ca_bg_income <- st_transform(ca_bg_income, st_crs(cali_longest_zones_sf))
+
+# --- Step 2: Spatial join block groups to evacuation zones ---
+evac_bg_join <- st_join(
+  ca_bg_income,
+  cali_longest_zones_sf %>% select(display_name, duration_hours),
+  join = st_intersects,
+  left = FALSE
+)
+
+# --- Step 3: Aggregate mean income per evacuation zone ---
+zone_income <- evac_bg_join %>%
+  group_by(display_name, duration_hours) %>%
+  summarise(
+    mean_income = mean(median_income, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# --- Step 4: Combine with population (from previous overlay) ---
+zone_income_pop <- zone_income %>%
+  st_drop_geometry() %>%  # drop geometry to join safely
+  left_join(evac_population_summary, by = "display_name")  # includes affected_population
+
+# --- Step 5: Compute Evacuation Duration Per Person ---
+zone_income_pop <- zone_income_pop %>%
+  mutate(
+    Evacuation_Per_Person = duration_hours / affected_population
+  )
+
+# --- Step 6: Rank-based Economic Disruption Score ---
+zone_income_pop <- zone_income_pop %>%
+  mutate(
+    # Rank zones: lower income → higher rank
+    income_rank = rank(mean_income, ties.method = "min"),
+    income_rank_rev = max(income_rank) - income_rank + 1,
+    
+    # Rank zones by evacuation per person: higher → higher rank
+    evac_rank = rank(Evacuation_Per_Person, ties.method = "min"),
+    
+    # Composite rank: sum of ranks
+    econ_disruption_rank = income_rank_rev + evac_rank
+  ) %>%
+  arrange(desc(econ_disruption_rank))
+
+# --- Step 7: View top 10 most economically disrupted zones ---
+top_econ_zones <- zone_income_pop %>%
+  select(
+    Zone = display_name,
+    Duration_Hours = duration_hours,
+    Population_Affected = affected_population,
+    Mean_Income = mean_income,
+    Evacuation_Per_Person,
+    Income_Rank_Rev = income_rank_rev,
+    Evac_Rank = evac_rank,
+    Economic_Disruption_Rank = econ_disruption_rank
+  )
+
+top_econ_zones
+```
+
+For each evacuation zone, we calculated the mean of the median household incomes of all block groups that intersect the zone. This gives us a single representative income value per zone. While each block group’s income is itself a median, the zone-level value is an average of these medians, not the exact median of all households within the zone. We then rank zones by this value, so higher-ranked zones have higher average block-group median incomes. This approach uses the mean of block-group medians as a proxy for the overall economic situation in the zone. It is simpler to compute and avoids needing microdata for every household, but it slightly differs from calculating the true median across the entire zone. Note: ‘mean of medians’ ≈ central tendency of incomes, not exact zone median.
+
+To assess the economic impact of evacuations, we calculated a composite Economic Disruption Rank for each evacuation zone by combining measures of economic vulnerability and evacuation burden. First, each zone was ranked by mean household income, with lower-income zones receiving higher scores to reflect greater economic vulnerability (Income_Rank_Rev). Next, we calculated the evacuation burden per person by dividing total evacuation duration by the affected population, and ranked zones so that higher burdens corresponded to higher ranks (Evac_Rank). Finally, the Economic Disruption Rank was computed as the sum of these two ranks, identifying zones that simultaneously experience longer evacuations per person and greater economic vulnerability. This rank-based approach provides an intuitive measure of which communities are most economically disrupted, while minimizing the influence of extreme values and differing units across the underlying metrics.
+
+```{r econ_disruption_barchart, eval = TRUE}
+library(ggplot2)
+library(scales)
+library(dplyr)
+
+# Arrange zones by rank for plotting
+zone_plot_data <- zone_income_pop %>%
+  arrange((econ_disruption_rank)) %>%
+  mutate(Zone_Label = factor(display_name, levels = display_name))
+
+# Horizontal bar chart
+ggplot(zone_plot_data, aes(x = econ_disruption_rank, y = Zone_Label, fill = Evacuation_Per_Person)) +
+  geom_col() +
+  scale_fill_gradient(low = "#EDF3F7", high = "#4A6FA5", name = "Evacuation per Person") +
+  scale_x_continuous(labels = comma) +
+  labs(
+    title = "Economic Disruption Rank by Evacuation Zone",
+    subtitle = "Composite of low income and evacuation burden",
+    x = "Economic Disruption Rank (higher = more disrupted)",
+    y = "Evacuation Zone"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+```{r econ_disruption_scatterplot, eval = TRUE}
+
+library(ggplot2)
+library(ggrepel)
+library(scales)
+
+# Identify top 3 zones
+top3_zones <- zone_income_pop %>%
+  slice_max(econ_disruption_rank, n = 7)
+
+# Scatterplot with labels for top 3 zones
+ggplot(zone_income_pop, 
+       aes(x = mean_income, 
+           y = Evacuation_Per_Person, 
+           size = affected_population, 
+           color = econ_disruption_rank)) +
+  geom_point(alpha = 0.7) +
+  geom_text_repel(
+    data = top3_zones,
+    aes(label = display_name),
+    size = 2.5,
+    fontface = "bold",
+    nudge_y = 0.5
+  ) +
+  scale_size(range = c(3, 10), name = "Population Affected") +
+  scale_color_viridis_c(option = "plasma", direction = -1, name = "Economic Disruption Rank") +
+  scale_x_continuous(labels = comma) +
+  labs(
+    title = "Economic Disruption Across Evacuation Zones",
+    x = "Mean Household Income ($)",
+    y = "Evacuation Duration per Person (hrs)",
+    caption = "Lower income and longer evacuation per person → higher disruption"
+  ) +
+  theme_minimal(base_size = 13)
+
+```
+
+
