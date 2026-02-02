@@ -115,10 +115,10 @@ evac_zones_sf <- st_as_sf(evac_zones, wkt = "geom", crs = 4326, quiet = TRUE)
 evac_zones_sf <- evac_zones_sf %>%
   rename(geometry = geom)
 
-# Fix invalid polygons (degenerate edges, etc.)
+# Fix invalid polygons 
 evac_zones_sf <- st_make_valid(evac_zones_sf)
 
-# Drop empty geometries (now works since the column is named correctly)
+# Drop empty geometries
 evac_zones_sf <- evac_zones_sf %>%
   filter(!st_is_empty(geometry))
 
@@ -630,31 +630,6 @@ evac_summary_table <- evac_impact %>%
 evac_summary_table
 ```
 
-Now I want to combine my top 10% evacuation zones in California by population with duration and Cumulative Population Exposure, and then I'll visualize it clearly. 
-
-```{r population_duration_top10, eval = TRUE}
-
-library(tidyverse)
-
-# Top 10% zones by population affected
-top10pct_evac_summary <- evac_impact %>%
-  st_drop_geometry() %>%
-  slice_max(affected_population, prop = 0.10) %>%  # use original column name
-  mutate(
-    Cumulative_Population_Exposure = affected_population * duration_hours
-  ) %>%
-  select(
-    Zone = display_name,
-    Duration_Hours = duration_hours,
-    Population_Affected = affected_population,
-    Cumulative_Population_Exposure
-  ) %>%
-  arrange(desc(Population_Affected))
-
-# View table
-top10pct_evac_summary
-```
-
 
 ```{r population_duration_top10_barchart, eval = TRUE}
 library(ggplot2)
@@ -668,7 +643,7 @@ evac_summary <- evac_impact %>%
     affected_population = sum(affected_population, na.rm = TRUE),
     .groups = "drop"
   ) %>%
-  arrange(desc(affected_population)) %>%
+  arrange(affected_population) %>%
   mutate(
     Zone_Label = factor(display_name, levels = display_name)
   )
@@ -688,3 +663,62 @@ ggplot(evac_summary, aes(x = affected_population, y = Zone_Label, fill = duratio
 
 ```
 
+How much evacuation time does the average person in this zone experience? 
+
+To answer that question, we need to calculate the Evacuation Duration per person. I decided to report per-capita evacuation duration for all California zones rather than restricting to a percentile cutoff, so the analysis reflects the full distribution of community impacts and avoids arbitrary thresholds.
+
+```{r evacuation_per_person_cali, eval = TRUE}
+
+library(tidyverse)
+
+california_evac_summary <- evac_impact %>%
+  st_drop_geometry() %>%
+  mutate(
+    Evacuation_Duration_Per_Person = duration_hours / affected_population
+  ) %>%
+  select(
+    Zone = display_name,
+    Duration_Hours = duration_hours,
+    Population_Affected = affected_population,
+    Evacuation_Duration_Per_Person
+  ) %>%
+  arrange(desc(Evacuation_Duration_Per_Person))
+
+# View table
+california_evac_summary
+```
+
+```{r duration_per_person_cali_barchart, eval = TRUE}
+library(ggplot2)
+library(tidyverse)
+library(scales)
+
+# Summarize by zone 
+evac_summary <- evac_impact %>%
+  group_by(display_name, duration_hours) %>%
+  summarise(
+    duration_hours = max(duration_hours, na.rm = TRUE), affected_population = sum(affected_population, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    Evacuation_Duration_Per_Person = duration_hours / affected_population,
+    Zone_Label = factor(display_name, levels = display_name[order(Evacuation_Duration_Per_Person)])
+  )
+
+# Plot
+ggplot(evac_summary, 
+       aes(x = Evacuation_Duration_Per_Person, 
+           y = Zone_Label, 
+           fill = duration_hours)) +
+  geom_col() +
+  scale_fill_gradient(low = "#EDF3F7", high = "#4A6FA5", name = "Total Duration (hrs)") +
+  scale_x_continuous(labels = comma) +
+  labs(
+    title = "Evacuation Duration Per Person by Zone",
+    subtitle = "In California",
+    x = "Evacuation Duration Per Person (hrs)",
+    y = "Evacuation Zone"
+  ) +
+  theme_minimal(base_size = 13)
+
+```
