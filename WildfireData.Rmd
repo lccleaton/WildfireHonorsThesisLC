@@ -783,9 +783,9 @@ st_transform() reprojects the polygons, converting coordinates so everything lin
 
 We queried the ACS 5-year survey for median household income for all block groups in California. We only kept the GEOID and renamed estimate as median_income. NAs were removed, and median_income was converted to numeric. 
 
-Income data was attached to each blcok group polygon by GEOID, and teh evacuation zones were reprojected to match the CRS of the block groups. 
+Income data was attached to each block group polygon by GEOID, and the evacuation zones were reprojected to match the CRS of the block groups. 
 
-Next, we will calculate the median household income per evacuation zone and rank the zones based on their income. 
+Next, we will calculate the estimated median household income per evacuation zone and rank the zones based on their income. 
 
 ```{r top_economic_disruption_zones, eval = TRUE}
 
@@ -807,7 +807,7 @@ evac_bg_join <- st_join(
 zone_income <- evac_bg_join %>%
   group_by(display_name, duration_hours) %>%
   summarise(
-    mean_income = mean(median_income, na.rm = TRUE),
+    est_median_income = mean(median_income, na.rm = TRUE),
     .groups = "drop"
   )
 
@@ -826,7 +826,7 @@ zone_income_pop <- zone_income_pop %>%
 zone_income_pop <- zone_income_pop %>%
   mutate(
     # Rank zones: lower income → higher rank
-    income_rank = rank(mean_income, ties.method = "min"),
+    income_rank = rank(est_median_income, ties.method = "min"),
     income_rank_rev = max(income_rank) - income_rank + 1,
     
     # Rank zones by evacuation per person: higher → higher rank
@@ -843,7 +843,7 @@ top_econ_zones <- zone_income_pop %>%
     Zone = display_name,
     Duration_Hours = duration_hours,
     Population_Affected = affected_population,
-    Mean_Income = mean_income,
+    Est_Median_Income = est_median_income,
     Evacuation_Per_Person,
     Income_Rank_Rev = income_rank_rev,
     Evac_Rank = evac_rank,
@@ -852,6 +852,7 @@ top_econ_zones <- zone_income_pop %>%
 
 top_econ_zones
 ```
+**Est_Median_Income = Estimated Median Income (the mean of all overlapped median household incomes within the zones)
 
 For each evacuation zone, we calculated the mean of the median household incomes of all block groups that intersect the zone. This gives us a single representative income value per zone. While each block group’s income is itself a median, the zone-level value is an average of these medians, not the exact median of all households within the zone. We then rank zones by this value, so higher-ranked zones have higher average block-group median incomes. This approach uses the mean of block-group medians as a proxy for the overall economic situation in the zone. It is simpler to compute and avoids needing microdata for every household, but it slightly differs from calculating the true median across the entire zone. Note: ‘mean of medians’ ≈ central tendency of incomes, not exact zone median.
 
@@ -887,35 +888,181 @@ library(ggplot2)
 library(ggrepel)
 library(scales)
 
-# Identify top 3 zones
-top3_zones <- zone_income_pop %>%
+# Identify top 7 zones
+top7_zones <- zone_income_pop %>%
   slice_max(econ_disruption_rank, n = 7)
+
+# Identify two lowest zones
+bottom2_zones <- zone_income_pop %>%
+  slice_min(econ_disruption_rank, n=2)
 
 # Scatterplot with labels for top 3 zones
 ggplot(zone_income_pop, 
-       aes(x = mean_income, 
+       aes(x = est_median_income, 
            y = Evacuation_Per_Person, 
            size = affected_population, 
            color = econ_disruption_rank)) +
   geom_point(alpha = 0.7) +
+  
+  # Labels for highest disruption 
   geom_text_repel(
-    data = top3_zones,
+    data = top7_zones,
     aes(label = display_name),
     size = 2.5,
     fontface = "bold",
     nudge_y = 0.5
   ) +
+  
+    # Labels for lowest disruption (yellow dots)
+  geom_text_repel(
+    data = bottom2_zones,
+    aes(label = display_name),
+    size = 2.5,
+    fontface = "bold",
+    nudge_y = 0.5,
+    color = "gray30"
+  ) +
+  
   scale_size(range = c(3, 10), name = "Population Affected") +
   scale_color_viridis_c(option = "plasma", direction = -1, name = "Economic Disruption Rank") +
   scale_x_continuous(labels = comma) +
   labs(
     title = "Economic Disruption Across Evacuation Zones",
-    x = "Mean Household Income ($)",
+    x = "Estimated Median Household Income ($)",
     y = "Evacuation Duration per Person (hrs)",
-    caption = "Lower income and longer evacuation per person → higher disruption"
   ) +
   theme_minimal(base_size = 13)
 
 ```
+Next, we will bring in C17002 - Ratio of Income to Poverty Level in the Past 12 Months ACS 2024 from the US Census.
 
+Poverty captures vulnerability better than income alone. Poverty rate directly measures households with limited savings, greater likelihood of income shocks, lower ability to evacuate or recover, and greater dependence on public assistance.
+
+I want to combine the poverty rate and median income data to truly capture the evacuation burden per person. 
+
+```{r read_poverty, eval = TRUE}
+poverty_raw <- read_csv("ACSDT5Y2024.C17002-Data.csv")
+```
+```{r poverty col_names, eval = TRUE}
+colnames(poverty_raw)
+```
+```{r clean_poverty_data, eval = TRUE}
+library(dplyr)
+
+poverty_clean <- poverty_raw %>%
+  select(
+    GEOID = GEO_ID,
+    total_pop = C17002_001E,
+    below_50 = C17002_002E,
+    below_100 = C17002_003E
+  ) %>%
+  mutate(
+    GEOID = substr(GEOID, 10, 21),
+    total_pop = as.numeric(total_pop),
+    below_50 = as.numeric(below_50),
+    below_100 = as.numeric(below_100),
+    below_poverty = below_50 + below_100,
+    poverty_rate = below_poverty / total_pop
+  ) %>%
+  filter(!is.na(poverty_rate))
+```
+
+```{r join_poverty_block_groups, eval = TRUE}
+ca_bg$GEOID <- as.character(ca_bg$GEOID)
+poverty_clean$GEOID <- as.character(poverty_clean$GEOID)
+
+ca_bg_poverty <- ca_bg %>%
+  left_join(poverty_clean, by = "GEOID")
+```
+
+```{r aggregate_poverty_evaczones, eval = TRUE}
+evac_poverty_join <- st_join(
+  ca_bg_poverty,
+  cali_longest_zones_sf,
+  join = st_intersects,
+  left = FALSE
+)
+
+zone_poverty <- evac_poverty_join %>%
+  group_by(display_name) %>%
+  summarise(
+    poverty_rate = weighted.mean(poverty_rate, total_pop, na.rm = TRUE)
+  )
+```
+
+```{r poverty_distribution, eval = TRUE}
+library(ggplot2)
+library(scales)
+library(dplyr)
+
+# Arrange zones by poverty rate
+zone_plot_poverty <- zone_poverty %>%
+  arrange(poverty_rate) %>%
+  mutate(Zone_Label = factor(display_name, levels = display_name))
+
+# Horizontal bar chart
+ggplot(zone_plot_poverty,
+       aes(x = poverty_rate,
+           y = Zone_Label,
+           fill = poverty_rate)) +
+  geom_col() +
+  scale_fill_gradient(
+    low = "#EDF3F7",
+    high = "#4A6FA5",
+    labels = percent_format(accuracy = 1),
+    name = "Poverty Rate"
+  ) +
+  scale_x_continuous(labels = percent_format(accuracy = 1)) +
+  labs(
+    title = "Population-Weighted Poverty Rate by Evacuation Zone",
+    subtitle = "ACS 2024 5-Year Estimates",
+    x = "Poverty Rate",
+    y = "Evacuation Zone"
+  ) +
+  theme_minimal(base_size = 12)
+
+summary(zone_poverty$poverty_rate)
+```
+
+o estimate poverty at the evacuation zone level, I aggregated Census block group data using a population-weighted mean rather than a simple average. Each block group has its own poverty rate and total population, and evacuation zones often intersect multiple block groups of very different sizes. A simple arithmetic mean would treat each block group equally regardless of whether it contains 300 residents or 5,000 residents, which could substantially distort the estimate. Instead, I calculated a weighted mean in which each block group’s poverty rate is multiplied by its total population, summed across all intersecting block groups, and then divided by the total population within the evacuation zone. Mathematically, this is expressed as the sum of (poverty_rate × population) divided by the sum of population. This approach ensures that larger population centers contribute proportionally more to the zone-level estimate, meaning the final value represents the share of people—rather than the share of spatial units—living below the poverty threshold within each evacuation zone. Using population-weighted aggregation aligns the measure with the study’s focus on human vulnerability and economic resilience, and avoids biases introduced by uneven census geography.
+
+```{r poverty_map, eval = TRUE}
+
+zone_poverty <- zone_poverty %>%
+  st_drop_geometry()
+
+zone_map <- cali_longest_zones_sf %>%
+  left_join(zone_poverty, by = "display_name")
+
+library(leaflet)
+library(scales)
+
+pal <- colorNumeric(
+  palette = "Blues",
+  domain = zone_map$poverty_rate,
+  na.color = "transparent"
+)
+
+leaflet(zone_map) %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  addPolygons(
+    fillColor = ~pal(poverty_rate),
+    weight = 1,
+    color = "white",
+    fillOpacity = 0.8,
+    popup = ~paste0(
+      "<strong>Zone:</strong> ", display_name,
+      "<br><strong>Poverty Rate:</strong> ",
+      percent(poverty_rate, accuracy = 0.1)
+    )
+  ) %>%
+  addLegend(
+    pal = pal,
+    values = ~poverty_rate,
+    labFormat = labelFormat(suffix = "%", transform = function(x) x * 100),
+    title = "Poverty Rate",
+    position = "bottomright"
+  )
+
+```
 
