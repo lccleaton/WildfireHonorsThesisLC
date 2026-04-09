@@ -279,8 +279,8 @@ ggplot(evac_timeline_full, aes(x = diff_hours, fill = region)) +
   scale_fill_manual(values = c("All Zones" = "steelblue", "California" = "darkorange")) +
   labs(
     title = "Evacuation Duration Distribution",
-    subtitile = "California vs All Zones",
-    x = "Evacuation Duration (hours)",
+    subtitile = "In the United States",
+    x = "Evacuation Duration (hrs)",
     y = "Percentage of Evacuation Zones",
     fill = "Region"
   ) +
@@ -651,10 +651,10 @@ evac_summary <- evac_impact %>%
 # Plot
 ggplot(evac_summary, aes(x = affected_population, y = Zone_Label, fill = duration_hours)) +
   geom_col() +
-  scale_fill_gradient(low = "lightblue", high = "darkblue", name = "Duration (hrs)") +
+  scale_fill_gradient(low = "lightblue", high = "darkblue", name = "Total Duration (hrs)") +
   scale_x_continuous(labels = comma) +
   labs(
-    title = "Evacuation Zones by Population Affected",
+    title = "Population Affected by Zone",
     subtitle = "In California",
     x = "Population Affected",
     y = "Evacuation Zone"
@@ -711,7 +711,7 @@ ggplot(evac_summary,
            y = Zone_Label, 
            fill = duration_hours)) +
   geom_col() +
-  scale_fill_gradient(low = "#EDF3F7", high = "#4A6FA5", name = "Total Duration (hrs)") +
+  scale_fill_gradient(low = "lightblue", high = "darkblue", name = "Total Duration (hrs)") +
   scale_x_continuous(labels = comma) +
   labs(
     title = "Evacuation Duration Per Person by Zone",
@@ -829,7 +829,7 @@ zone_income_pop <- zone_income_pop %>%
     income_rank = rank(est_median_income, ties.method = "min"),
     income_rank_rev = max(income_rank) - income_rank + 1,
     
-    # Rank zones by evacuation per person: higher → higher rank
+    # Rank zones by evacuation per person: higher = higher rank
     evac_rank = rank(Evacuation_Per_Person, ties.method = "min"),
     
     # Composite rank: sum of ranks
@@ -874,9 +874,9 @@ ggplot(zone_plot_data, aes(x = econ_disruption_rank, y = Zone_Label, fill = Evac
   scale_fill_gradient(low = "#EDF3F7", high = "#4A6FA5", name = "Evacuation per Person") +
   scale_x_continuous(labels = comma) +
   labs(
-    title = "Economic Disruption Rank by Evacuation Zone",
-    subtitle = "Composite of low income and evacuation burden",
-    x = "Economic Disruption Rank (higher = more disrupted)",
+    title = "Economic Disruption Rank by Zone",
+    subtitle = "In California",
+    x = "Economic Disruption Rank",
     y = "Evacuation Zone"
   ) +
   theme_minimal(base_size = 12)
@@ -927,7 +927,8 @@ ggplot(zone_income_pop,
   scale_color_viridis_c(option = "plasma", direction = -1, name = "Economic Disruption Rank") +
   scale_x_continuous(labels = comma) +
   labs(
-    title = "Economic Disruption Across Evacuation Zones",
+    title = "Economic Disruption Across Zones",
+    subtitle = "In California",
     x = "Estimated Median Household Income ($)",
     y = "Evacuation Duration per Person (hrs)",
   ) +
@@ -1014,8 +1015,8 @@ ggplot(zone_plot_poverty,
   ) +
   scale_x_continuous(labels = percent_format(accuracy = 1)) +
   labs(
-    title = "Population-Weighted Poverty Rate by Evacuation Zone",
-    subtitle = "ACS 2024 5-Year Estimates",
+    title = "ACS 2024 Poverty Rate by Zone",
+    subtitle = "In California",
     x = "Poverty Rate",
     y = "Evacuation Zone"
   ) +
@@ -1024,7 +1025,7 @@ ggplot(zone_plot_poverty,
 summary(zone_poverty$poverty_rate)
 ```
 
-o estimate poverty at the evacuation zone level, I aggregated Census block group data using a population-weighted mean rather than a simple average. Each block group has its own poverty rate and total population, and evacuation zones often intersect multiple block groups of very different sizes. A simple arithmetic mean would treat each block group equally regardless of whether it contains 300 residents or 5,000 residents, which could substantially distort the estimate. Instead, I calculated a weighted mean in which each block group’s poverty rate is multiplied by its total population, summed across all intersecting block groups, and then divided by the total population within the evacuation zone. Mathematically, this is expressed as the sum of (poverty_rate × population) divided by the sum of population. This approach ensures that larger population centers contribute proportionally more to the zone-level estimate, meaning the final value represents the share of people—rather than the share of spatial units—living below the poverty threshold within each evacuation zone. Using population-weighted aggregation aligns the measure with the study’s focus on human vulnerability and economic resilience, and avoids biases introduced by uneven census geography.
+To estimate poverty at the evacuation zone level, I aggregated Census block group data using a population-weighted mean rather than a simple average. Each block group has its own poverty rate and total population, and evacuation zones often intersect multiple block groups of very different sizes. A simple arithmetic mean would treat each block group equally regardless of whether it contains 300 residents or 5,000 residents, which could substantially distort the estimate. Instead, I calculated a weighted mean in which each block group’s poverty rate is multiplied by its total population, summed across all intersecting block groups, and then divided by the total population within the evacuation zone. Mathematically, this is expressed as the sum of (poverty_rate × population) divided by the sum of population. This approach ensures that larger population centers contribute proportionally more to the zone-level estimate, meaning the final value represents the share of people—rather than the share of spatial units—living below the poverty threshold within each evacuation zone. Using population-weighted aggregation aligns the measure with the study’s focus on human vulnerability and economic resilience, and avoids biases introduced by uneven census geography.
 
 ```{r poverty_map, eval = TRUE}
 
